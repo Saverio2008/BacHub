@@ -30,7 +30,9 @@ export default defineConfig({
             targets: [
                 { src: 'manifest.json', dest: '' },
                 { src: 'src/assets', dest: 'assets' },
-                { src: 'src/popup/popup.html', dest: 'popup' }
+                { src: 'src/popup/**/*', dest: 'popup' },
+                { src: 'src/content/**/*', dest: 'content' },
+                { src: 'src/background/**/*', dest: 'background' }
             ],
         }),
     ],

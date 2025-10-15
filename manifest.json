@@ -3,7 +3,7 @@
   "name": "Bachub",
   "version": "0.1.0",
   "description": "Assist students to download ManageBac files",
-  "permissions": ["downloads", "scripting", "storage", "activeTab"],
+  "permissions": ["cookies", "downloads", "scripting", "storage", "activeTab"],
   "host_permissions": ["https://*.managebac.com/*"],
   "background": {
     "service_worker": "background/background.js"
