@@ -4,13 +4,13 @@
   "version": "0.1.0",
   "description": "Assist students to download ManageBac files",
   "permissions": ["cookies", "downloads", "scripting", "storage", "activeTab"],
-  "host_permissions": ["https://*.managebac.com/*"],
+  "host_permissions": ["https://*.managebac.cn/*"],
   "background": {
     "service_worker": "background/background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://*.managebac.com/*"],
+      "matches": ["https://*.managebac.cn/*"],
       "js": ["content/content.js"]
     }
   ],

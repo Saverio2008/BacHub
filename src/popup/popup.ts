@@ -8,8 +8,16 @@ const messages: Record<
     LangCode,
     { title: string; description: string; loginStatus: (loggedIn: boolean) => string }
 > = {
-    en: { title: 'File Reader', description: 'Enable or disable file info fetching on ManageBac.', loginStatus: (loggedIn: boolean) => loggedIn ? 'Status: Logged in' : 'Status: Not logged in' },
-    zh: { title: '文件读取器', description: '启用或关闭 ManageBac 的文件信息获取功能。', loginStatus: (loggedIn: boolean) => loggedIn ? '状态：已登录' : '状态：未登录' },
+    en: {
+        title: 'File Reader',
+        description: 'Enable or disable file info fetching on ManageBac.',
+        loginStatus: loggedIn => (loggedIn ? 'Status: Logged in' : 'Status: Not logged in'),
+    },
+    zh: {
+        title: '文件读取器',
+        description: '启用或关闭 ManageBac 的文件信息获取功能。',
+        loginStatus: loggedIn => (loggedIn ? '状态：已登录' : '状态：未登录'),
+    },
 };
 
 @customElement('app-popup')
@@ -20,7 +28,8 @@ export class AppPopup extends LitElement {
     @state() loggedIn = false;
     @state() enabled = false;
     @state() fetching = false;
-    @state() buttonLabel: '读取' | '刷新' = '读取';
+    @state() buttonLabel: '读取' | '抓取中...' | '刷新' = '读取';
+    @state() statusMessage = '';
 
     connectedCallback() {
         super.connectedCallback();
@@ -37,6 +46,7 @@ export class AppPopup extends LitElement {
         const updateLoginStatus = (loggedIn: boolean) => {
             this.loggedIn = loggedIn;
             fetchBtn.disabled = !loggedIn;
+            this.statusMessage = messages[this.lang].loginStatus(loggedIn);
         };
 
         runtime.sendMessage({ type: 'get-login-status' }, (resp: { loggedIn: boolean }) => {
@@ -55,15 +65,26 @@ export class AppPopup extends LitElement {
 
         fetchBtn.addEventListener('click', () => {
             if (!this.loggedIn || this.fetching) return;
+
             this.fetching = true;
-            this.buttonLabel = '读取';
+            this.buttonLabel = '抓取中...';
             fetchBtn.textContent = this.buttonLabel;
             fetchBtn.disabled = true;
-            runtime.sendMessage({ type: 'fetch-files' }, () => {
+            this.statusMessage = '正在抓取课程文件...';
+
+            runtime.sendMessage({ type: 'fetch-files' }, (response: any) => {
                 this.fetching = false;
                 this.buttonLabel = '刷新';
                 fetchBtn.textContent = this.buttonLabel;
                 fetchBtn.disabled = !this.loggedIn;
+
+                if (response?.data) {
+                    this.statusMessage = '抓取完成';
+                    console.log('Fetched files:', response.data);
+                } else if (response?.error) {
+                    this.statusMessage = '抓取失败';
+                    console.error('Error fetching files:', response.error);
+                }
             });
         });
     }
@@ -75,6 +96,7 @@ export class AppPopup extends LitElement {
         <h1 title="${msg.description}">${msg.title}</h1>
         <span class="status-dot ${this.loggedIn ? 'logged-in' : ''}"></span>
       </div>
+      <div class="status-text">${this.statusMessage}</div>
       <label id="fileSwitch" class="switch">
         <input id="fileToggle" type="checkbox" />
         <span class="slider"></span>
