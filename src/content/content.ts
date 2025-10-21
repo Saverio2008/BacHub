@@ -1,153 +1,181 @@
-interface FileInfo {
-    name: string;
-    url?: string;
-    mime_type?: string;
-    size?: string;
-    created_at?: string;
-    children?: FileInfo[];
+type RuntimeType = typeof chrome | typeof browser | undefined;
+const runtime: RuntimeType =
+    typeof browser !== "undefined"
+        ? browser
+        : typeof chrome !== "undefined"
+            ? chrome
+            : undefined;
+
+function cleanupInjectedElements() {
+    document.querySelectorAll<HTMLElement>(".cb-wrapper").forEach(wrapper => {
+        const parent = wrapper.parentElement;
+        if (!parent) return;
+
+        Array.from(wrapper.children).forEach(child => {
+            const el = child as HTMLElement;
+
+            if (el.classList.contains("cb-file") || el.classList.contains("cb-folder") || el.classList.contains("cb-select-all")) {
+                el.remove();
+            } else {
+                parent.appendChild(el);
+            }
+        });
+        wrapper.remove();
+    });
+    document.querySelectorAll<HTMLElement>(".cb-select-all").forEach(el => el.remove());
 }
 
-interface CourseFiles {
-    [courseName: string]: FileInfo[];
+function wrapRightColumnWithCheckbox(lastCol: HTMLDivElement, cbDiv: HTMLDivElement) {
+    if (lastCol.querySelector(".cb-wrapper")) return;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "cb-wrapper";
+    wrapper.style.display = "flex";
+    wrapper.style.alignItems = "center";
+    wrapper.style.justifyContent = "flex-end";
+    wrapper.style.gap = "4px";
+    wrapper.style.width = "100%";
+
+    cbDiv.style.margin = "0";
+    cbDiv.style.padding = "0";
+
+    while (lastCol.firstChild) wrapper.appendChild(lastCol.firstChild);
+    wrapper.appendChild(cbDiv);
+    lastCol.appendChild(wrapper);
 }
 
-function sleep(ms: number) {
-    return new Promise((r) => setTimeout(r, ms));
-}
+function createCheckbox(className: string, role: "all" | "item"): HTMLDivElement {
+    const cbDiv = document.createElement("div");
+    cbDiv.className = className;
+    cbDiv.dataset.injected = "true";
+    cbDiv.dataset.role = role;
+    cbDiv.style.cssText = `
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: 4px;
+    `;
 
-async function waitForContainerStable(doc: Document, duration = 1500, checks = 3): Promise<HTMLElement | null> {
-    let container: HTMLElement | null = null;
-    for (let i = 0; i < 10; i++) {
-        container = doc.querySelector<HTMLElement>("div.total-commander.clearfix");
-        if (container) break;
-        await sleep(500);
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cbDiv.appendChild(cb);
+
+    if (role === "all") {
+        cb.addEventListener("change", () => {
+            const event = new CustomEvent("file-selection-toggle", {
+                detail: { checked: cb.checked },
+            });
+            window.dispatchEvent(event);
+        });
+    } else {
+        cb.addEventListener("change", () => {
+            const event = new CustomEvent("file-selection-updated");
+            window.dispatchEvent(event);
+        });
+        window.addEventListener("file-selection-toggle", (e: any) => {
+            cb.checked = e.detail.checked;
+        });
     }
-    if (!container) return null;
-    let lastCount = 0;
-    for (let i = 0; i < checks; i++) {
-        const current = container.querySelectorAll(".row, .content-panel").length;
-        if (current === lastCount && current > 0) return container;
-        lastCount = current;
-        await sleep(duration);
-    }
-    return container;
+
+    return cbDiv;
 }
 
-let currentIframe: HTMLIFrameElement | null = null;
+async function injectCheckboxes(enabled: boolean) {
+    if (!enabled) {
+        cleanupInjectedElements();
+        return;
+    }
 
-async function fetchFilesFromUrl(url: string): Promise<FileInfo[]> {
-    return new Promise<FileInfo[]>((resolve) => {
-        if (currentIframe) {
-            document.body.removeChild(currentIframe);
-            currentIframe = null;
+    const existingAll = document.querySelector(".cb-select-all");
+    if (existingAll) return;
+
+    const headerRow = document.querySelector<HTMLDivElement>("div.row.header");
+    const pageHead = document.querySelector<HTMLDivElement>("div.page-head-tile.flex.flex-wrap.mb-0");
+    let targetCol: HTMLDivElement | null = null;
+
+    if (headerRow) {
+        targetCol = headerRow.querySelector<HTMLDivElement>("div.col-sm-3");
+    }
+    if (!targetCol && pageHead) {
+        targetCol = pageHead;
+    }
+
+    if (targetCol) {
+        const cbDiv = createCheckbox("cb-select-all", "all");
+        if (targetCol === pageHead) {
+            cbDiv.style.marginLeft = "auto";
+            targetCol.appendChild(cbDiv);
+        } else {
+            wrapRightColumnWithCheckbox(targetCol, cbDiv);
         }
-        const iframe = document.createElement("iframe");
-        iframe.style.display = "none";
-        document.body.appendChild(iframe);
-        currentIframe = iframe;
-        iframe.src = url;
-        const cleanup = () => {
-            if (document.body.contains(iframe)) document.body.removeChild(iframe);
-            if (currentIframe === iframe) currentIframe = null;
-        };
-        iframe.onload = async () => {
-            const doc = iframe.contentDocument;
-            if (!doc) {
-                cleanup();
-                resolve([]);
-                return;
-            }
-            const container = await waitForContainerStable(doc);
-            if (!container) {
-                cleanup();
-                resolve([]);
-                return;
-            }
-            const files = await parseFileList(container);
-            cleanup();
-            resolve(files);
-        };
-        setTimeout(() => {
-            cleanup();
-            resolve([]);
-        }, 20000);
+    }
+
+    for (const row of document.querySelectorAll<HTMLDivElement>("div.row.file.mt-0.px-4")) {
+        if (row.querySelector(".cb-folder")) continue;
+        const lastCol = row.querySelector<HTMLDivElement>("div.col-sm-3");
+        if (!lastCol) continue;
+        const cbDiv = createCheckbox("cb-folder", "item");
+        wrapRightColumnWithCheckbox(lastCol, cbDiv);
+    }
+
+    for (const row of document.querySelectorAll<HTMLDivElement>('div.row.file.px-4[data-ec3-info]')) {
+        if (row.querySelector(".cb-file")) continue;
+        const lastCol = row.querySelector<HTMLDivElement>("div.col-sm-3");
+        if (!lastCol) continue;
+        const cbDiv = createCheckbox("cb-file", "item");
+        wrapRightColumnWithCheckbox(lastCol, cbDiv);
+    }
+
+    const allCheckbox = document.querySelector<HTMLInputElement>('.cb-select-all input');
+    if (allCheckbox) {
+        window.addEventListener("file-selection-updated", () => {
+            const items = Array.from(document.querySelectorAll<HTMLInputElement>('.cb-folder input, .cb-file input'));
+            allCheckbox.checked = items.length > 0 && items.every(cb => cb.checked);
+        });
+    }
+}
+
+async function getFeatureState(): Promise<boolean> {
+    return new Promise(resolve => {
+        runtime?.runtime?.sendMessage?.({ type: "get-file-toggle" }, (resp: { active: boolean }) =>
+            resolve(resp?.active ?? false)
+        );
     });
 }
 
-async function parseFileList(container: HTMLElement): Promise<FileInfo[]> {
-    const files: FileInfo[] = [];
-    const fileDivs = Array.from(container.querySelectorAll<HTMLDivElement>("div.row.file.px-4[data-ec3-info]"));
-    for (const div of fileDivs) {
-        const data = div.getAttribute("data-ec3-info");
-        if (!data) continue;
-        try {
-            const info = JSON.parse(data);
-            files.push({
-                name: info.name,
-                url: info.download_url,
-                mime_type: info.mime_type,
-                size: info.file_size
-                    ? info.file_size > 1024 * 1024
-                        ? `${(info.file_size / (1024 * 1024)).toFixed(2)} MB`
-                        : `${Math.round(info.file_size / 1024)} KB`
-                    : undefined,
-                created_at: info.created_at
-            });
-        } catch {}
-    }
-    const folderLinks = Array.from(container.querySelectorAll<HTMLAnchorElement>("div.row.file.mt-0.px-4 a[href*='/folder/']"));
-    for (const a of folderLinks) {
-        const folderName = a.textContent?.trim() || "Unnamed Folder";
-        const href = a.getAttribute("href");
-        if (!href) continue;
-        const absUrl = new URL(href, window.location.origin).href;
-        let children: FileInfo[] = [];
-        for (let i = 0; i < 3; i++) {
-            children = await fetchFilesFromUrl(absUrl);
-            if (children.length > 0) break;
-            await sleep(1000);
+async function initInjection() {
+    let enabled = await getFeatureState();
+    await injectCheckboxes(enabled);
+
+    runtime?.runtime?.onMessage?.addListener((msg: any) => {
+        if (msg?.type === "feature-toggled") {
+            if (!msg.active) cleanupInjectedElements();
+            void injectCheckboxes(msg.active);
         }
-        files.push({
-            name: folderName,
-            children
-        });
-    }
-    return files;
+    });
+
+    let pending = false;
+    const observer = new MutationObserver(async () => {
+        if (pending) return;
+        pending = true;
+        setTimeout(async () => {
+            const state = await getFeatureState();
+            await injectCheckboxes(state);
+            pending = false;
+        }, 800);
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    window.addEventListener("beforeunload", () => {
+        cleanupInjectedElements();
+        observer.disconnect();
+    });
 }
 
-async function fetchCourseFiles(a: HTMLAnchorElement): Promise<FileInfo[]> {
-    const baseUrl = a.getAttribute("href");
-    if (!baseUrl) return [];
-    const filesUrl = baseUrl.endsWith("/files") ? baseUrl : `${baseUrl}/files`;
-    return await fetchFilesFromUrl(filesUrl);
+if (document.readyState === "complete" || document.readyState === "interactive") {
+    void initInjection();
+} else {
+    window.addEventListener("DOMContentLoaded", () => void initInjection());
 }
-
-async function main(): Promise<CourseFiles> {
-    const menu = document.querySelector("li.f-menu__item.parent.js-menu-classes-list[data-path='classes']");
-    if (!menu) return {};
-    const courseFiles: CourseFiles = {};
-    const links = Array.from(menu.querySelectorAll<HTMLAnchorElement>("li.f-menu__submenu-item a.f-menu__submenu-link"));
-    for (const a of links) {
-        const name = a.querySelector(".f-menu__submenu-link-title")?.textContent.trim();
-        if (!name) continue;
-        courseFiles[name] = await fetchCourseFiles(a);
-    }
-    return courseFiles;
-}
-
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg.type === "fetch-files") {
-        main().then((files) => {
-            sendResponse({ type: "content-response", data: files });
-            const json = JSON.stringify(files, null, 2);
-            const blob = new Blob([json], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "course_files.json";
-            a.click();
-            URL.revokeObjectURL(url);
-        });
-        return true;
-    }
-});
